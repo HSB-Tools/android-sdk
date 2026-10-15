@@ -148,7 +148,7 @@ case "$PLATFORM" in
     CROSS_STRIP="$TC/bin/llvm-strip"; CROSS_OBJCOPY="$TC/bin/llvm-objcopy"
     SYSTEM_NAME=Linux
     # reallocarray is API 29+ in bionic; host_compat.h shims it on lower APIs.
-    CROSS_CFLAGS="-Wno-error=date-time -fno-sanitize=undefined -include $ROOTDIR/patches/misc/host_compat.h -static"
+    CROSS_CFLAGS="-Wno-error=date-time -include $ROOTDIR/patches/misc/host_compat.h -static"
     # r30's libc.a carries Rust's libstd, so rust_eh_personality arrives both
     # from there and from our own Rust shim in libtermuxadb.a. Both are the same
     # routine out of two toolchains; let the linker keep the first.
@@ -375,11 +375,10 @@ mkdir -p "$EXTRA_PREFIX"
 if [ ! -f "$EXTRA_PREFIX/lib/libz.a" ]; then
   log "Building zlib (static, $TARGET)"
   # MIPS -mabicalls needs -fPIC (else a clang warning trips zlib's configure).
-  # -fno-sanitize=undefined: libz.a is prebuilt, so the ubsan runtime isn't linked
-  # in, leaving __ubsan_handle_* undefined.
+  # No sanitizer is enabled anywhere in this build, so no -fno-sanitize is needed.
   case "$TARGET" in
-    mips*|mipsel*) ZLIB_CFLAGS="-fPIC -fno-sanitize=undefined" ;;
-    *)             ZLIB_CFLAGS="-fno-sanitize=undefined" ;;
+    mips*|mipsel*) ZLIB_CFLAGS="-fPIC" ;;
+    *)             ZLIB_CFLAGS="" ;;
   esac
   ( cd "$ROOTDIR"
     fetch_unpack https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz /tmp/zlib-1.3.1.tar.xz
