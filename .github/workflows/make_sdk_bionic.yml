@@ -34,5 +34,6 @@ jobs:
       tag: ${{ inputs.tag }}
       ndk_version: ${{ inputs.ndk_version }}
       ndk_revision: ${{ inputs.ndk_revision }}
-      # riscv64-linux-android
-      targets: '["aarch64-linux-android", "armv7a-linux-androideabi", "i686-linux-android", "x86_64-linux-android"]'
+      # arm64 only: the device that needs this build is aarch64, and one
+      # target keeps the bionic matrix (the long pole) short.
+      targets: '["aarch64-linux-android"]'
