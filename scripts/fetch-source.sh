@@ -27,6 +27,12 @@ jq -r '.[] | "\(.path)\t\(.url)"' repos.json | while IFS="$(printf '\t')" read -
 done
 
 # --- in-place source fixups -------------------------------------------------
+# FETCH_ONLY=1 stops right after the clones, so CI can cache the pristine tree
+# and still run the fixups on every build (patch-source.sh is not idempotent).
+if [ -n "${FETCH_ONLY:-}" ]; then
+  log "FETCH_ONLY set: stopping before source fixups"
+  exit 0
+fi
 TARGET="${TARGET:-}" ROOTDIR="$ROOTDIR" "$SCRIPT_DIR/patch-source.sh"
 
 log "Sources ready under $ROOTDIR/src"

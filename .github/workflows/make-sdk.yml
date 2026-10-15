@@ -76,6 +76,37 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      # --- caches: the dev loop rebuilds the same tree over and over, so the
+      # expensive, input-stable work (NDK download, AOSP clone, compiled
+      # objects) is worth keeping between runs. Keys cover the inputs that
+      # actually change the content; a changed key just means a cold build.
+      - name: Cache official NDK
+        if: inputs.platform == 'bionic'
+        uses: actions/cache@v4
+        with:
+          path: /mnt/build/android-ndk-r${{ inputs.ndk_version }}${{ inputs.ndk_revision }}
+          key: ndk-r${{ inputs.ndk_version }}${{ inputs.ndk_revision }}-${{ runner.os }}-${{ runner.arch }}
+
+      # Pristine clones only: patch-source.sh edits sources in place and is not
+      # idempotent, so a patched tree must never be cached. Keyed on the source
+      # tag + repos.json, which is exactly what changes the clone content --
+      # patches/ and build.sh changes deliberately do NOT invalidate it.
+      - name: Cache AOSP sources
+        uses: actions/cache@v4
+        with:
+          path: /mnt/build/.src-cache
+          key: aosp-src-${{ inputs.tag }}-${{ hashFiles('repos.json') }}
+
+      # ccache: rolling key + restore-keys prefix so every run reuses the
+      # previous objects and only recompiles what changed.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /mnt/build/.ccache
+          key: ccache-${{ inputs.platform }}-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ inputs.platform }}-${{ matrix.target }}-
+
       - name: Log in to GHCR
         uses: docker/login-action@v4.2.0
         with:
@@ -89,6 +120,7 @@ jobs:
           docker run --rm \
             -v "/mnt/build:/work" -w /work --user "$(id -u):$(id -g)" \
             -e HOME=/work \
+            -e CCACHE_DIR=/work/.ccache \
             -e PLATFORM='${{ inputs.platform }}' \
             -e TARGET='${{ matrix.target }}' \
             -e TAG='${{ inputs.tag }}' \
@@ -97,7 +129,21 @@ jobs:
             -e NDK_REVISION='${{ inputs.ndk_revision }}' \
             -e ROOTDIR=/work \
             "$IMAGE" \
-            bash -c 'scripts/fetch-source.sh && scripts/build.sh && scripts/make-sdk.sh'
+            bash -c '
+              set -e
+              if [ -s /work/.src-cache/src.tar ]; then
+                echo "==> restoring pristine AOSP sources from cache"
+                tar -xf /work/.src-cache/src.tar -C /work
+              else
+                echo "==> cache miss: cloning AOSP sources"
+                FETCH_ONLY=1 scripts/fetch-source.sh
+                mkdir -p /work/.src-cache
+                tar -cf /work/.src-cache/src.tar src
+              fi
+              scripts/patch-source.sh
+              scripts/build.sh
+              scripts/make-sdk.sh
+            '
 
       - name: Release
         uses: ncipollo/release-action@v1.21.0

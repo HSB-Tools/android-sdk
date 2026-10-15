@@ -397,6 +397,22 @@ if [ ! -f "$EXTRA_PREFIX/lib/libbz2.a" ]; then
     cp -f bzlib.h "$EXTRA_PREFIX/include/" )
 fi
 
+# ccache: only enabled when CCACHE_DIR is set (CI mounts a persisted dir). The
+# launcher is compiler-agnostic -- ccache hashes the compiler binary and the
+# full flag set -- so one directory safely serves every target and platform.
+# BASEDIR rewrites the checkout prefix to relative paths, so a build under
+# /work reuses objects no matter which runner produced them.
+CCACHE_CMAKE=()
+if [ -n "${CCACHE_DIR:-}" ] && command -v ccache >/dev/null 2>&1; then
+  export CCACHE_BASEDIR="$ROOTDIR"
+  export CCACHE_COMPILERCHECK=content
+  export CCACHE_SLOPPINESS="include_file_ctime,include_file_mtime,time_macros,locale"
+  export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-2G}"
+  mkdir -p "$CCACHE_DIR"
+  CCACHE_CMAKE=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  log "ccache enabled (dir=$CCACHE_DIR, max=$CCACHE_MAXSIZE)"
+fi
+
 # --- the SDK host tools -----------------------------------------------------
 # TARGET_OS maps PLATFORM to the AOSP Android.bp os axis (the only way CMake
 # tells android from a Linux host, since bionic sets CMAKE_SYSTEM_NAME=Linux).
@@ -431,6 +447,7 @@ cmake -GNinja \
   -DABSL_PROPAGATE_CXX_STD=ON \
   -DCMAKE_BUILD_TYPE=MinSizeRel \
   -DPROTOC_PATH="$PROTOC" \
+  "${CCACHE_CMAKE[@]}" \
   "${CROSS_CMAKE_EXTRA[@]}"
 
 # Vendored subprojects (protobuf/boringssl/...) define codegen commands with no
