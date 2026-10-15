@@ -90,12 +90,15 @@ jobs:
       # Pristine clones only: patch-source.sh edits sources in place and is not
       # idempotent, so a patched tree must never be cached. Keyed on the source
       # tag + repos.json, which is exactly what changes the clone content --
-      # patches/ and build.sh changes deliberately do NOT invalidate it.
+      # patches/ and build.sh changes deliberately do NOT invalidate it. No
+      # restore-keys on purpose: a different tag must clone, not reuse a tree.
+      # The txz marker versions the archive format; the raw src.tar this used to
+      # hold was too large for the runner to save.
       - name: Cache AOSP sources
         uses: actions/cache@v4
         with:
           path: /mnt/build/.src-cache
-          key: aosp-src-${{ inputs.tag }}-${{ hashFiles('repos.json') }}
+          key: aosp-src-txz-${{ inputs.tag }}-${{ hashFiles('repos.json') }}
 
       # ccache: rolling key + restore-keys prefix so every run reuses the
       # previous objects and only recompiles what changed.
@@ -131,14 +134,19 @@ jobs:
             "$IMAGE" \
             bash -c '
               set -e
-              if [ -s /work/.src-cache/src.tar ]; then
+              if [ -s /work/.src-cache/src.tar.xz ]; then
                 echo "==> restoring pristine AOSP sources from cache"
-                tar -xf /work/.src-cache/src.tar -C /work
+                tar -xJf /work/.src-cache/src.tar.xz -C /work
               else
                 echo "==> cache miss: cloning AOSP sources"
                 FETCH_ONLY=1 scripts/fetch-source.sh
                 mkdir -p /work/.src-cache
-                tar -cf /work/.src-cache/src.tar src
+                # xz, not a raw tar: the tar alone was too large for the runner
+                # to save (tar exited 2 mid-save). Compress under a temp name and
+                # rename, so an interrupted save can never leave a half archive
+                # that the next run would trust.
+                tar -cJf /work/.src-cache/src.tar.xz.tmp src
+                mv /work/.src-cache/src.tar.xz.tmp /work/.src-cache/src.tar.xz
               fi
               scripts/patch-source.sh
               scripts/build.sh
