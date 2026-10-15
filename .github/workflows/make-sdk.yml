@@ -77,9 +77,9 @@ jobs:
       - uses: actions/checkout@v5
 
       # --- caches: the dev loop rebuilds the same tree over and over, so the
-      # expensive, input-stable work (NDK download, AOSP clone, compiled
-      # objects) is worth keeping between runs. Keys cover the inputs that
-      # actually change the content; a changed key just means a cold build.
+      # expensive, input-stable work (NDK download, compiled objects) is worth
+      # keeping between runs. Keys cover the inputs that actually change the
+      # content; a changed key just means a cold build.
       - name: Cache official NDK
         if: inputs.platform == 'bionic'
         uses: actions/cache@v4
@@ -87,18 +87,11 @@ jobs:
           path: /mnt/build/android-ndk-r${{ inputs.ndk_version }}${{ inputs.ndk_revision }}
           key: ndk-r${{ inputs.ndk_version }}${{ inputs.ndk_revision }}-${{ runner.os }}-${{ runner.arch }}
 
-      # Pristine clones only: patch-source.sh edits sources in place and is not
-      # idempotent, so a patched tree must never be cached. Keyed on the source
-      # tag + repos.json, which is exactly what changes the clone content --
-      # patches/ and build.sh changes deliberately do NOT invalidate it. No
-      # restore-keys on purpose: a different tag must clone, not reuse a tree.
-      # The txz marker versions the archive format; the raw src.tar this used to
-      # hold was too large for the runner to save.
-      - name: Cache AOSP sources
-        uses: actions/cache@v4
-        with:
-          path: /mnt/build/.src-cache
-          key: aosp-src-txz-${{ inputs.tag }}-${{ hashFiles('repos.json') }}
+      # No AOSP source cache (measured 2026-10-15): xz-ing the multi-GB tree
+      # cost ~10 min per run to replace a ~4 min clone, and the save never
+      # succeeded anyway -- the runner ran out of disk and the job died on
+      # "No space left on device". Cloning is cheaper and safe; a patched tree
+      # could never be cached regardless (patch-source.sh is not idempotent).
 
       # ccache: rolling key + restore-keys prefix so every run reuses the
       # previous objects and only recompiles what changed.
@@ -132,26 +125,7 @@ jobs:
             -e NDK_REVISION='${{ inputs.ndk_revision }}' \
             -e ROOTDIR=/work \
             "$IMAGE" \
-            bash -c '
-              set -e
-              if [ -s /work/.src-cache/src.tar.xz ]; then
-                echo "==> restoring pristine AOSP sources from cache"
-                tar -xJf /work/.src-cache/src.tar.xz -C /work
-              else
-                echo "==> cache miss: cloning AOSP sources"
-                FETCH_ONLY=1 scripts/fetch-source.sh
-                mkdir -p /work/.src-cache
-                # xz, not a raw tar: the tar alone was too large for the runner
-                # to save (tar exited 2 mid-save). Compress under a temp name and
-                # rename, so an interrupted save can never leave a half archive
-                # that the next run would trust.
-                tar -cJf /work/.src-cache/src.tar.xz.tmp src
-                mv /work/.src-cache/src.tar.xz.tmp /work/.src-cache/src.tar.xz
-              fi
-              scripts/patch-source.sh
-              scripts/build.sh
-              scripts/make-sdk.sh
-            '
+            bash -c 'scripts/fetch-source.sh && scripts/build.sh && scripts/make-sdk.sh'
 
       - name: Release
         uses: ncipollo/release-action@v1.21.0
