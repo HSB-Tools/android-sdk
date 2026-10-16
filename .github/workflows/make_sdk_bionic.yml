@@ -19,6 +19,10 @@ on:
         description: "Official NDK revision letter (optional)"
         required: false
         default: ""
+      release_suffix:
+        description: "Suffix for the release tag, e.g. 16c880a (default: short commit sha)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -34,6 +38,9 @@ jobs:
       tag: ${{ inputs.tag }}
       ndk_version: ${{ inputs.ndk_version }}
       ndk_revision: ${{ inputs.ndk_revision }}
+      # Empty => the reusable workflow tags the release with the short commit
+      # sha (<version>+<sha>), so a fixed build never overwrites the old tag.
+      release_suffix: ${{ inputs.release_suffix }}
       # arm64 only: the device that needs this build is aarch64, and one
       # target keeps the bionic matrix (the long pole) short.
       targets: '["aarch64-linux-android"]'
