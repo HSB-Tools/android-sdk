@@ -19,6 +19,10 @@ on:
         description: "Only these targets (JSON array), default all"
         required: false
         type: string
+      release_suffix:
+        description: "Suffix for the release tag, e.g. 16c880a (default: short commit sha)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -34,5 +38,8 @@ jobs:
       ndk_version: ${{ inputs.ndk_version }}
       ndk_revision: ${{ inputs.ndk_revision }}
       only: ${{ inputs.only }}
+      # Empty => the reusable workflow tags the release with the short commit
+      # sha (<version>+<sha>), so a fixed build never overwrites the old tag.
+      release_suffix: ${{ inputs.release_suffix }}
       # riscv64-linux-android
       targets: '["aarch64-linux-android", "armv7a-linux-androideabi", "i686-linux-android", "x86_64-linux-android"]'

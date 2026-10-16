@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: ""
+      release_suffix:
+        description: "Suffix for the release tag (default: short commit sha)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -94,17 +99,29 @@ jobs:
             "$IMAGE" \
             bash -c 'scripts/fetch-source.sh && scripts/build.sh && scripts/make-sdk.sh'
 
-      - name: Release name
-        id: release
+      # The release tag must identify the exact build. Historically it was just
+      # Pkg.Revision, so a rebuild of the same revision silently overwrote the
+      # previous asset and a consumer pinning that tag could not tell one build
+      # from the next. Append a suffix after '+': the release_suffix input when
+      # set, otherwise the short commit sha, so every commit gets a unique,
+      # traceable tag and old tags are never rewritten.
+      - name: Compute release tag
         run: |
-          name="$(sed -n 's/^Pkg\.Revision=//p' src/development/sdk/plat_tools_source.prop_template 2>/dev/null)"
-          echo "name=${name:-${{ inputs.tag }}}" >> "$GITHUB_OUTPUT"
+          revision="$(sed -n 's/^Pkg\.Revision=//p' src/development/sdk/plat_tools_source.prop_template 2>/dev/null)"
+          version="${revision:-${{ inputs.tag }}}"
+          suffix='${{ inputs.release_suffix }}'
+          if [ -z "$suffix" ]; then
+            suffix="$(git rev-parse --short=8 HEAD)"
+          fi
+          echo "RELEASE_TAG=${version}+${suffix}" >> "$GITHUB_ENV"
+          echo "release tag: ${version}+${suffix}"
 
       - name: Release
         uses: ncipollo/release-action@v1.21.0
         with:
-          tag: "${{ steps.release.outputs.name }}"
+          name: "${{ env.RELEASE_TAG }}"
+          tag: "${{ env.RELEASE_TAG }}"
           artifacts: ${{ github.workspace }}/android-sdk-${{ matrix.target }}.${{ inputs.platform == 'windows' && '7z' || 'tar.xz' }}
           allowUpdates: true
           replacesArtifacts: true
-          body: ''
+          body: 'Built from ${{ github.sha }}'
