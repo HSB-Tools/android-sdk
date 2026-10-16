@@ -68,6 +68,36 @@ CROSS_CMAKE_EXTRA=()   # extra -D flags a platform may need (e.g. macOS sysroot)
 SOONG_VARS=()          # --var flags for the builder's select()s
 EXE_LDFLAGS_EXTRA=""   # appended to CMAKE_EXE_LINKER_FLAGS only (not shared libs)
 CROSS_ASMFLAGS=""      # CMAKE_ASM_FLAGS (the C flags force-include C headers)
+
+# --- arc4random fork-safety splice ------------------------------------------
+# The official NDK's sysroot arc4random.o gets its fork safety from
+# madvise(MADV_WIPEONFORK), which kernels before 4.14 reject with EINVAL; bionic
+# answers that with __libc_fatal, so every -static host tool dies at startup
+# ("arc4random data MADV_WIPEONFORK failed"). Rebuild that one libc.a member
+# from bionic main (pid-check forkdetect, no madvise) and splice it into the
+# target ABI's sysroot before the host tools link. Kit:
+# patches/bionic/arc4random-forkdetect/.
+splice_arc4random() {
+  [ "$PLATFORM" = bionic ] || return 0
+  local kit="$ROOTDIR/patches/bionic/arc4random-forkdetect"
+  local work="$BUILD_DIR/arc4random-splice" libdir
+  [ -d "$kit/src" ] || { echo "splice_arc4random: $kit/src missing" >&2; return 1; }
+  # shellcheck source=../patches/bionic/arc4random-forkdetect/splice-core.sh
+  . "$kit/splice-core.sh"
+  arc4_splice_work_init "$work" "$kit"
+  # The wrapper carries the ABI; its lib dir name differs only for armv7a.
+  case "$TARGET" in
+    armv7a-linux-androideabi) libdir=arm-linux-androideabi ;;
+    aarch64-linux-android|i686-linux-android|x86_64-linux-android|riscv64-linux-android)
+      libdir="$TARGET" ;;
+    *) echo "splice_arc4random: no arc4random splice for $TARGET" >&2; return 0 ;;
+  esac
+  local libc="$TC/sysroot/usr/lib/$libdir/libc.a"
+  [ -f "$libc" ] || { echo "splice_arc4random: no $libc" >&2; return 1; }
+  log "Splicing arc4random.o into $libc"
+  arc4_splice_abi "$CROSS_CC" "$libc" "$work"
+}
+
 case "$PLATFORM" in
   linux)
     TC=/opt/zig-as-llvm
@@ -161,9 +191,9 @@ case "$PLATFORM" in
     mkdir -p "$BUILD_DIR"
     "$CROSS_CC" -c "$ROOTDIR/patches/misc/bionic_tls_align.S" -o "$BUILD_DIR/bionic_tls_align.o"
     EXE_LDFLAGS_EXTRA="$BUILD_DIR/bionic_tls_align.o"
-    log "Building bionic madvise wrap for older kernel compatibility"
-    "$CROSS_CC" -O2 -c "$ROOTDIR/patches/misc/bionic_wipeonfork_compat.c" -o "$BUILD_DIR/bionic_wipeonfork_compat.o"
-    EXE_LDFLAGS_EXTRA="$EXE_LDFLAGS_EXTRA $BUILD_DIR/bionic_wipeonfork_compat.o -Wl,--wrap=madvise"
+    # Make the NDK's arc4random.o fork-safe without madvise(MADV_WIPEONFORK)
+    # before any host tool links against its libc.a (see splice_arc4random).
+    splice_arc4random
     # termux-usb shim: built into bionic adb/fastboot, inert until LIBUSB_TERMUX_IMPL=1.
     case "$TARGET" in
       aarch64-linux-android)    RUST_TARGET=aarch64-linux-android ;;
